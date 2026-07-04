@@ -1,66 +1,101 @@
-# AI-Driven E2E Test Self-Healing Engine
+# AI 기반 E2E 테스트 자가 치유 엔진
 
-Automatically repair broken Playwright E2E tests. When a UI change renames or restructures
-an element, the engine diagnoses the failure, patches the broken selector/wait, re-runs the
-test until it passes (or a retry cap is hit), and writes the fix back — as a local CLI or a
-CI GitHub Action that opens a patch PR.
+깨진 Playwright E2E 테스트를 자동으로 복구합니다. UI 변경으로 요소가 이름이 바뀌거나
+구조가 달라져 테스트의 셀렉터가 깨지면, 엔진이 실패 원인을 진단하고 → 셀렉터/대기 조건을
+패치하고 → 테스트를 다시 실행하는 과정을 테스트가 통과하거나 재시도 한도에 도달할 때까지
+반복한 뒤 수정본을 파일에 기록합니다. 로컬 **CLI**로도, 패치 PR을 여는 **CI GitHub
+Action**으로도 동작합니다.
 
-> **Scope guardrail:** the engine only fixes **failing locators and wait conditions**. It
-> never touches assertions or test logic. Patches are always human-reviewable.
+> **안전장치(가드레일):** 엔진은 **실패한 셀렉터(locator)와 대기 조건만** 수정합니다.
+> 단언(assertion)이나 테스트 로직은 절대 건드리지 않으며, 패치는 항상 사람이 검토할 수
+> 있는 형태로 남습니다.
 
-## How it works
+## 동작 방식
 
-Four layers drive a LangGraph repair loop:
+네 개의 계층이 LangGraph 복구 루프를 구동합니다.
 
-1. **CLI core** — the single entry point (`e2e-healer`); everything, including CI, calls it.
-2. **Data Preprocessor** — abstracts the raw Playwright log and the `git diff` into compact,
-   hallucination-resistant context (the failing selector + the DOM attribute that changed).
-3. **LangGraph agent** — `Diagnoser → Patch Generator → Test Runner`, looping via a
-   conditional Router until the test passes or `max_loops` is reached.
-4. **Test Runner** — runs `npx playwright test` via subprocess to validate each attempt.
+1. **CLI 코어** — 단일 진입점(`e2e-healer`). CI를 포함한 모든 호출이 이곳으로 들어옵니다.
+2. **데이터 전처리기(Preprocessor)** — 원본 Playwright 로그와 `git diff`를 LLM이 이해하기
+   쉬운 압축된, 환각(hallucination)에 강한 컨텍스트로 추상화합니다(실패한 셀렉터 + 변경된
+   DOM 속성만 추출).
+3. **LangGraph 에이전트** — `Diagnoser → Patch Generator → Test Runner` 노드가 조건부
+   Router를 통해 테스트가 통과하거나 `max_loops`에 도달할 때까지 순환합니다.
+4. **Test Runner** — 각 시도를 검증하기 위해 `npx playwright test`를 서브프로세스로 실행합니다.
 
 ```
         ┌──────────┐      ┌─────────────────┐      ┌─────────────┐
   ──▶   │ Diagnoser │ ──▶ │ Patch Generator │ ──▶  │ Test Runner │ ──┐
         └──────────┘      └─────────────────┘      └─────────────┘   │
              ▲                                                        │
-             │        fail & loop_count < max                        │
+             │        실패 & loop_count < max                          │
              └───────────────────  Router  ◀──────────────────────────┘
-                                     │ pass or loop cap
+                                     │ 통과 또는 루프 한도 도달
                                      ▼
                                    [End]
 ```
 
-See [`docs/design.md`](docs/design.md) for the full design.
+전체 설계는 [`docs/design.md`](docs/design.md)를 참고하세요.
 
-## Install
+## 구현 현황
 
-Requires Python 3.13+ and a Playwright project (Node) in your repo.
+핵심 복구 루프가 처음부터 끝까지 동작하는 상태입니다.
+
+| 계층 / 구성요소                                  | 상태                                                   | 위치                                       |
+| ------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------ |
+| CLI 코어(`heal` 명령, 종료 코드 + `--json` 요약) | ✅ 구현 완료                                           | `app/cli.py`                               |
+| 에러 로그 파서                                   | ✅ 구현 완료                                           | `app/preprocess/error_log_parser.py`       |
+| Diff-JSX AST 분석기(정규식 휴리스틱)             | ✅ 구현 완료                                           | `app/preprocess/diff_ast_analyzer.py`      |
+| LangGraph 상태 / 그래프 조립                     | ✅ 구현 완료                                           | `app/state.py`, `app/graph.py`             |
+| Diagnoser 노드                                   | ✅ 구현 완료                                           | `app/nodes/diagnoser.py`                   |
+| Patch Generator 노드(Structured Outputs)         | ✅ 구현 완료                                           | `app/nodes/patch_generator.py`             |
+| Test Runner 노드 + Router 조건부 엣지            | ✅ 구현 완료                                           | `app/nodes/test_runner.py`, `app/graph.py` |
+| LLM 클라이언트                                   | ✅ **NVIDIA NIM(`openai/gpt-oss-120b`)으로 전환 완료** | `app/llm.py`                               |
+| GitHub Action 래퍼 + 셀프 데모 워크플로          | ✅ 구현 완료                                           | `action.yml`, `ci/`                        |
+| 테스트 스위트(pytest)                            | ✅ 대부분 통과(아래 참고)                              | `tests/`                                   |
+
+> **참고 — LLM 제공자:** 초기 OpenAI 구현에서 **NVIDIA NIM의 OpenAI 호환 엔드포인트**로
+> 마이그레이션했습니다. OpenAI SDK를 그대로 쓰되 `base_url`만 NVIDIA로 지정합니다. 기본
+> 모델 `openai/gpt-oss-120b`는 추론(reasoning) 모델이라 `reasoning_content`가 응답 토큰을
+> 잠식하지 않도록 두 호출 모두 `max_tokens`를 명시합니다. 패치 생성기의 Structured Outputs
+> 가드레일(`response_format=PatchOutput`)은 그대로 유지되며 실제 호출로 검증했습니다.
+
+### 알려진 이슈 / 남은 작업
+
+- `tests/test_error_log_parser.py`의 라인 번호 단언이 파서 실제 출력과 어긋나 1건 실패
+  (기능 결함이 아닌 테스트 기대값 문제).
+- `app/nodes/test_runner.py::test_runner` 노드 함수가 이름 규칙상 pytest에 테스트로
+  잘못 수집됨(실제 테스트 아님, 수집 경고).
+- Diff 분석기는 v0.1에서 정규식 휴리스틱 → 향후 tree-sitter로 고도화 예정.
+
+## 설치
+
+Python 3.13+ 과 저장소 내 Playwright(Node) 프로젝트가 필요합니다.
 
 ```bash
-uv sync                 # or: pipx install ai-driven-e2e  (once published)
-cp .env.example .env    # then set E2E_HEALER_OPENAI_API_KEY
+uv sync                 # 또는 (배포 후): pipx install ai-driven-e2e
+cp .env.example .env    # 이후 E2E_HEALER_NVIDIA_API_KEY 설정
 ```
 
-## Usage (CLI)
+## 사용법 (CLI)
 
 ```bash
-# Heal a failing test. With no --log, the tool runs the test itself to capture the failure.
+# 실패한 테스트를 치유. --log 없이 실행하면 도구가 직접 테스트를 돌려 실패 로그를 수집.
 uv run e2e-healer tests/example.spec.ts
 
-# Preview only — run the loop but write nothing:
+# 미리보기 전용 — 루프는 돌리되 파일에는 아무것도 쓰지 않음:
 uv run e2e-healer tests/example.spec.ts --dry-run
 
-# Feed a pre-captured log and a PR-scoped diff (the CI path):
+# 미리 캡처한 로그와 PR 범위 diff를 넘기는 방식(CI 경로):
 uv run e2e-healer tests/example.spec.ts --log playwright.log --diff-base origin/main --json
 ```
 
-Exit code is `0` when the test is healed, non-zero otherwise. `--json` prints a machine-
-readable `RepairSummary` to stdout (human output goes to stderr) so CI can branch on it.
+테스트가 치유되면 종료 코드 `0`, 아니면 0이 아닌 값입니다. `--json`은 기계가 읽을 수 있는
+`RepairSummary`를 stdout으로 출력하며(사람용 출력은 stderr로 분리), CI가 이 값으로 분기할
+수 있습니다.
 
-## Usage (CI / GitHub Action)
+## 사용법 (CI / GitHub Action)
 
-Run the suite and auto-heal on failure, opening a patch PR for review. A generic wiring:
+스위트를 실행하고 실패 시 자동 치유한 뒤 검토용 패치 PR을 엽니다. 일반적인 연결 예시:
 
 ```yaml
 - name: E2E self-heal
@@ -68,7 +103,7 @@ Run the suite and auto-heal on failure, opening a patch PR for review. A generic
   uses: Lee-Dongwook/ai-driven-e2e@v0.2
   with:
     test-path: tests/example.spec.ts
-    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     diff-base: ${{ github.event.pull_request.base.sha }}
 
 - name: Open patch PR
@@ -79,24 +114,26 @@ Run the suite and auto-heal on failure, opening a patch PR for review. A generic
     branch: e2e-self-heal/${{ github.run_id }}
 ```
 
-The action's `outcome` output is `passed` \| `healed` \| `unhealed`. For a project whose
-Playwright suite lives in a subdirectory, pass `working-directory:`. A **runnable self-demo**
-that heals this repo's own `examples/` project is in
-[`ci/github-workflow.example.yml`](ci/github-workflow.example.yml) — copy it into
-`.github/workflows/` and set `OPENAI_API_KEY` to activate.
+액션의 `outcome` 출력값은 `passed` \| `healed` \| `unhealed` 중 하나입니다. Playwright
+스위트가 하위 디렉터리에 있으면 `working-directory:`를 넘기세요. 이 저장소의 `examples/`
+프로젝트를 스스로 치유하는 **실행 가능한 셀프 데모**가
+[`ci/github-workflow.example.yml`](ci/github-workflow.example.yml)에 있습니다 —
+`.github/workflows/`로 복사하고 `NVIDIA_API_KEY`를 설정하면 동작합니다.
 
-## Configuration
+## 설정
 
-All settings use the `E2E_HEALER_` prefix (see [`.env.example`](.env.example)):
+모든 설정은 `E2E_HEALER_` 접두사를 사용합니다([`.env.example`](.env.example) 참고).
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `E2E_HEALER_OPENAI_API_KEY` | — | LLM provider API key |
-| `E2E_HEALER_OPENAI_MODEL` | `gpt-4o-2024-08-06` | Structured-Outputs-capable model |
-| `E2E_HEALER_MAX_LOOPS` | `3` | Repair loop cap |
-| `E2E_HEALER_PLAYWRIGHT_CMD` | `npx playwright test` | Playwright invocation |
+| 변수                           | 기본값                                | 용도                             |
+| ------------------------------ | ------------------------------------- | -------------------------------- |
+| `E2E_HEALER_NVIDIA_API_KEY`    | —                                     | NVIDIA NIM API 키                |
+| `E2E_HEALER_NVIDIA_BASE_URL`   | `https://integrate.api.nvidia.com/v1` | OpenAI 호환 엔드포인트           |
+| `E2E_HEALER_NVIDIA_MODEL`      | `openai/gpt-oss-120b`                 | Structured Outputs 지원 모델     |
+| `E2E_HEALER_NVIDIA_MAX_TOKENS` | `4096`                                | 응답 토큰 한도(추론 모델 여유분) |
+| `E2E_HEALER_MAX_LOOPS`         | `3`                                   | 복구 루프 한도                   |
+| `E2E_HEALER_PLAYWRIGHT_CMD`    | `npx playwright test`                 | Playwright 실행 명령             |
 
-## Development
+## 개발
 
 ```bash
 make install    # uv sync --extra dev
@@ -104,14 +141,14 @@ make check      # ruff + pyright
 make test       # pytest
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+자세한 내용은 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고하세요.
 
-## Limitations
+## 한계
 
-- Fixes selectors and waits only — never assertions or control flow.
-- The JSX/TSX diff analyzer is a regex heuristic in v0.1 (tree-sitter upgrade planned).
-- Healing quality depends on the LLM and the clarity of the `git diff`.
+- 셀렉터와 대기 조건만 수정 — 단언이나 제어 흐름은 절대 건드리지 않음.
+- JSX/TSX diff 분석기는 v0.1 기준 정규식 휴리스틱(tree-sitter 업그레이드 예정).
+- 치유 품질은 LLM과 `git diff`의 명확성에 좌우됨.
 
-## License
+## 라이선스
 
 [MIT](LICENSE)

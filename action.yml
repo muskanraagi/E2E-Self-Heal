@@ -8,8 +8,8 @@ inputs:
   test-path:
     description: "Path to the Playwright test to heal when the suite fails"
     required: true
-  openai-api-key:
-    description: "API key for the LLM provider (E2E_HEALER_OPENAI_API_KEY)"
+  nvidia-api-key:
+    description: "API key for the NVIDIA NIM LLM provider (E2E_HEALER_NVIDIA_API_KEY)"
     required: true
   diff-base:
     description: "Base git ref to diff against as base...HEAD (e.g. the PR base sha)"
@@ -52,7 +52,7 @@ runs:
       id: heal
       shell: bash
       env:
-        E2E_HEALER_OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        E2E_HEALER_NVIDIA_API_KEY: ${{ inputs.nvidia-api-key }}
         E2E_HEALER_PLAYWRIGHT_CMD: ${{ inputs.playwright-cmd }}
       run: |
         set +e
