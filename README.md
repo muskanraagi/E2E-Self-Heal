@@ -17,6 +17,20 @@ a **CI GitHub Action** that opens a patch PR.
 > **Scope guardrail:** the engine only fixes **failing locators and wait conditions**. It
 > never touches assertions or test logic, and every patch stays human-reviewable.
 
+### Two modes: **heal** and **review**
+
+Auto-healing patches the _test_. That is fast, but on its own it can look like papering over
+a real problem — the source that broke the selector. So the engine offers a second mode:
+
+- **`heal`** (default) — patch the broken selector/wait and re-run until green. Best when the
+  UI change is intentional and the test simply needs to catch up.
+- **`review`** — diagnose _why_ the selector broke and post **source-level suggestions** as
+  **inline PR comments** (e.g. "this `className` rename broke `#cta`; add a stable
+  `data-testid` or use `getByRole`"). It **never edits the test** — it advises the fix at the
+  source and pushes teams toward resilient, accessibility-first selectors.
+
+Same diagnosis engine, two outputs: a patch, or a review. Pick per-project or per-PR.
+
 ![e2e-healer demo — diagnose, verify against the live DOM, re-run, fixed](https://raw.githubusercontent.com/Lee-Dongwook/E2E-Self-Heal/main/docs/demo.gif)
 
 ## How it works
@@ -153,11 +167,16 @@ uv run e2e-healer tests/example.spec.ts --log playwright.log --diff-base origin/
 
 # Enable live-DOM selector verification against a running app:
 uv run e2e-healer tests/example.spec.ts --app-url http://localhost:4173
+
+# Review mode — suggest source-level fixes instead of patching (never edits the test):
+uv run e2e-healer review tests/example.spec.ts --log playwright.log --diff-base origin/main --json
 ```
 
 Exit code is `0` when the test is healed, non-zero otherwise. `--json` prints a
 machine-readable `RepairSummary` to stdout (human output goes to stderr) so CI can branch
-on it.
+on it. `e2e-healer <path>` is shorthand for `e2e-healer heal <path>`; `review` is a separate
+subcommand that emits a `ReviewReport` (findings anchored to the changed source line) and
+always exits `0` — the CI wrapper branches on `has_findings`.
 
 ## Usage (CI / GitHub Action)
 
@@ -181,9 +200,26 @@ Run the suite and auto-heal on failure, opening a patch PR for review:
     branch: e2e-self-heal/${{ github.run_id }}
 ```
 
-The action's `outcome` output is `passed` \| `healed` \| `unhealed`. For a Playwright suite
-in a subdirectory, pass `working-directory:`. A **runnable self-demo** that heals this repo's
-own `examples/` project lives in [`ci/github-workflow.example.yml`](ci/github-workflow.example.yml).
+The action's `outcome` output is `passed` \| `healed` \| `unhealed` (heal mode) or `reviewed`
+(review mode). For a Playwright suite in a subdirectory, pass `working-directory:`. A
+**runnable self-demo** that heals this repo's own `examples/` project lives in
+[`ci/github-workflow.example.yml`](ci/github-workflow.example.yml).
+
+To run as a **PR review bot** instead, pass `mode: review` and post the findings as inline PR
+comments — a ready-to-copy workflow lives in
+[`ci/github-review-bot.example.yml`](ci/github-review-bot.example.yml):
+
+```yaml
+- name: E2E review
+  id: review
+  uses: Lee-Dongwook/E2E-Self-Heal@v0.2.0
+  with:
+    mode: review
+    test-path: tests/example.spec.ts
+    nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
+    diff-base: ${{ github.event.pull_request.base.sha }}
+# then read steps.review.outputs.review-path and post inline comments (see the example)
+```
 
 ## Configuration
 

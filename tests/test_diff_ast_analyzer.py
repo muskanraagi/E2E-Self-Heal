@@ -30,6 +30,24 @@ def test_ignores_non_jsx_files():
     assert analyze_diff(non_jsx) == []
 
 
+def test_tracks_new_file_line_of_changed_element():
+    # The changed <button> sits on line 2 of the new file (context line 1, then the +line).
+    assert analyze_diff(SAMPLE_DIFF)[0].line == 2
+
+
+def test_tracks_line_across_offset_hunk_header():
+    diff = """diff --git a/components/CTAButton.tsx b/components/CTAButton.tsx
+--- a/components/CTAButton.tsx
++++ b/components/CTAButton.tsx
+@@ -10,3 +20,3 @@ export function CTAButton() {
+   const label = 'Go'
+-  return <button className="old">{label}</button>
++  return <button className="new">{label}</button>
+"""
+    # new-file counter starts at 20 (hunk header), context line 20, changed +line 21.
+    assert analyze_diff(diff)[0].line == 21
+
+
 def test_returns_empty_list_on_none():
     assert analyze_diff(None) == []
 
