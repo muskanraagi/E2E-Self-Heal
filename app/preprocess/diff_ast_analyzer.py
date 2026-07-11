@@ -14,6 +14,7 @@ from app.schemas import DomDiff
 logger = structlog.get_logger(__name__)
 
 _FILE_RE = re.compile(r"^\+\+\+ b/(.+)$")
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _JSX_TAG_RE = re.compile(
     r"<([A-Za-z][\w.]*)((?:\s+[\w-]+=(?:\"[^\"]*\"|'[^']*'|\{[^}]*\}))*)\s*/?>"
 )
@@ -39,19 +40,21 @@ def analyze_diff(git_diff: str | None) -> list[DomDiff]:
 
     Pairs removed (``-``) and added (``+``) element lines within each file by order —
     a best-effort mapping sufficient for the Diagnoser to correlate a broken selector
-    with the attribute that changed.
+    with the attribute that changed. Each added element carries its 1-based new-file line
+    (tracked from ``@@`` hunk headers) so review mode can anchor an inline PR comment.
     """
     if not git_diff:
         return []
 
     diffs: list[DomDiff] = []
     current_file = ""
+    new_line = 0
     removed: list[dict] = []
-    added: list[dict] = []
+    added: list[tuple[dict, int]] = []
 
     def flush(file: str) -> None:
-        for previous, current in zip(removed, added):
-            diffs.append(DomDiff(file=file, previous=previous, current=current))
+        for previous, (current, line) in zip(removed, added):
+            diffs.append(DomDiff(file=file, line=line, previous=previous, current=current))
         removed.clear()
         added.clear()
 
@@ -63,14 +66,22 @@ def analyze_diff(git_diff: str | None) -> list[DomDiff]:
             continue
         if not current_file.endswith(_JSX_SUFFIXES):
             continue
+        hunk_match = _HUNK_RE.match(line)
+        if hunk_match:
+            new_line = int(hunk_match.group(1))
+            continue
         if line.startswith("-") and not line.startswith("---"):
             element = _parse_element(line[1:])
             if element:
                 removed.append(element)
-        elif line.startswith("+") and not line.startswith("+++"):
+            continue  # removed lines exist only in the old file — new-file line unchanged
+        if line.startswith("+") and not line.startswith("+++"):
             element = _parse_element(line[1:])
             if element:
-                added.append(element)
+                added.append((element, new_line))
+            new_line += 1
+            continue
+        new_line += 1  # unchanged context line advances the new-file counter
     flush(current_file)
 
     logger.debug("diff_analyzed", dom_changes=len(diffs))

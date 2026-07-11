@@ -48,6 +48,57 @@ def mock_graph_failure(monkeypatch):
     monkeypatch.setattr(cli_module, "build_graph", lambda: MockGraph())
 
 
+@pytest.fixture
+def mock_review_graph(monkeypatch):
+    class MockGraph:
+        def invoke(self, state):
+            state["review_report"] = {
+                "findings": [
+                    {
+                        "file": "components/CTAButton.tsx",
+                        "line": 12,
+                        "broken_selector": "#cta",
+                        "root_cause": "className renamed",
+                        "suggestion": "add a stable data-testid",
+                        "recommended_selector": "getByTestId('cta')",
+                        "severity": "warning",
+                    }
+                ]
+            }
+            return state
+
+    monkeypatch.setattr(cli_module, "build_review_graph", lambda: MockGraph())
+
+
+def test_cli_review_emits_report_and_leaves_file_unmodified(
+    mock_review_graph, monkeypatch, tmp_path
+):
+    test_file = tmp_path / "test.spec.ts"
+    original = "await page.click('#cta')"
+    test_file.write_text(original)
+    log_file = tmp_path / "error.log"
+    log_file.write_text("Timeout error waiting for selector")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["review", str(test_file), "--log", str(log_file), "--json"])
+    assert result.exit_code == 0
+
+    json_line = next(line for line in result.stdout.splitlines() if line.strip().startswith("{"))
+    data = json.loads(json_line)
+    assert data["has_findings"] is True
+    assert data["findings"][0]["file"] == "components/CTAButton.tsx"
+    assert data["findings"][0]["recommended_selector"] == "getByTestId('cta')"
+    # review mode is advisory only — the test file must be untouched.
+    assert test_file.read_text() == original
+
+
+def test_cli_review_test_path_not_exists():
+    runner = CliRunner()
+    result = runner.invoke(app, ["review", "nonexistent_file.spec.ts"])
+    assert result.exit_code == 2
+    assert "path not found:" in result.stderr
+
+
 def test_cli_test_path_not_exists():
     runner = CliRunner()
     result = runner.invoke(app, ["nonexistent_file.spec.ts"])
