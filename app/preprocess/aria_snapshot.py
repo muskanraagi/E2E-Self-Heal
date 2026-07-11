@@ -19,8 +19,10 @@ logger = structlog.get_logger(__name__)
 _SNAPSHOT_RE = re.compile(r"#\s*Page snapshot\s*```ya?ml\s*\n(.*?)\n```", re.DOTALL)
 
 
-def extract_page_snapshot(error_context_md: str) -> str:
+def extract_page_snapshot(error_context_md: str | None) -> str:
     """Return the ARIA page-snapshot YAML from an error-context.md body, or '' if absent."""
+    if not error_context_md:
+        return ""
     match = _SNAPSHOT_RE.search(error_context_md)
     return match.group(1).strip() if match else ""
 

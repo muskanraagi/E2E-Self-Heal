@@ -28,3 +28,11 @@ def test_captures_before_and_after_attributes():
 def test_ignores_non_jsx_files():
     non_jsx = SAMPLE_DIFF.replace(".tsx", ".css")
     assert analyze_diff(non_jsx) == []
+
+
+def test_returns_empty_list_on_none():
+    assert analyze_diff(None) == []
+
+
+def test_returns_empty_list_on_empty_string():
+    assert analyze_diff("") == []
