@@ -31,6 +31,10 @@ No code block here
     assert extract_page_snapshot("") == ""
 
 
+def test_extract_page_snapshot_none():
+    assert extract_page_snapshot(None) == ""
+
+
 def test_read_failure_snapshot_missing_dir():
     assert read_failure_snapshot(Path("does/not/exist")) == ""
 

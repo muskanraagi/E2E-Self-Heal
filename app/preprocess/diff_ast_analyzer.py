@@ -34,13 +34,16 @@ def _parse_element(line: str) -> dict | None:
     return {"tag": tag_match.group(1), "attributes": attrs}
 
 
-def analyze_diff(git_diff: str) -> list[DomDiff]:
+def analyze_diff(git_diff: str | None) -> list[DomDiff]:
     """Parse the JSX/TSX regions of a git diff into lightweight DOM diffs.
 
     Pairs removed (``-``) and added (``+``) element lines within each file by order —
     a best-effort mapping sufficient for the Diagnoser to correlate a broken selector
     with the attribute that changed.
     """
+    if not git_diff:
+        return []
+
     diffs: list[DomDiff] = []
     current_file = ""
     removed: list[dict] = []
