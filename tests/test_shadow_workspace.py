@@ -66,6 +66,7 @@ def test_cleanup_always_removes_workspace_regardless_of_outcome(tmp_path):
 
     assert not ws.base_dir.exists()
 
+
 def test_shadow_workspace_helper_paths_use_expected_directories(tmp_path):
     workspace = ShadowWorkspace(
         ShadowConfig(
