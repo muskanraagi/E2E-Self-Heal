@@ -13,9 +13,7 @@ from app.shadow.scoring import MatchScorer, ScoringWeights
 from app.shadow.schemas import CapturedRequest
 
 WEIGHTS = ScoringWeights()
-FULL_SCORE = (
-    WEIGHTS.exact_url_bonus + WEIGHTS.query_max + WEIGHTS.headers_max + WEIGHTS.body_max
-)
+FULL_SCORE = WEIGHTS.exact_url_bonus + WEIGHTS.query_max + WEIGHTS.headers_max + WEIGHTS.body_max
 
 
 @pytest.fixture
@@ -28,6 +26,7 @@ def make_request(method="GET", url="/api/x", headers=None, body=None) -> Capture
 
 
 # --- Incompatibility (-1.0) cases ------------------------------------------------
+
 
 def test_different_methods_are_incompatible(scorer):
     r1 = make_request(method="GET")
@@ -55,6 +54,7 @@ def test_different_uuids_in_path_still_match(scorer):
 
 # --- Exact match -------------------------------------------------------------
 
+
 def test_exact_match_scores_full_marks(scorer):
     body = json.dumps({"x": 1})
     r1 = make_request(url="/api/x?a=1", headers={"H": "v"}, body=body)
@@ -69,6 +69,7 @@ def test_identical_requests_with_no_query_headers_or_body(scorer):
 
 
 # --- Partial match -------------------------------------------------------------
+
 
 def test_partial_match_scores_between_zero_and_full(scorer):
     r1 = make_request(url="/api/x?a=1&b=2", body=json.dumps({"x": 1, "y": 2}))
@@ -87,6 +88,7 @@ def test_same_url_different_query_values_uses_base_url_match(scorer):
 
 # --- No overlap on query/headers/body, but same method + path -------------------
 
+
 def test_disjoint_query_and_body_keys_score_low(scorer):
     r1 = make_request(url="/api/x?a=1", body=json.dumps({"x": 1}))
     r2 = make_request(url="/api/x?b=2", body=json.dumps({"y": 2}))
@@ -96,15 +98,13 @@ def test_disjoint_query_and_body_keys_score_low(scorer):
 
 # --- Boundary / tie cases -------------------------------------------------------
 
+
 def test_tie_boundary_half_of_query_keys_match(scorer):
     r1 = make_request(url="/api/x?a=1&b=2")
     r2 = make_request(url="/api/x?a=1&b=999")
     score = scorer.calculate_score(r1, r2)
     expected = (
-        WEIGHTS.base_url_match
-        + 0.5 * WEIGHTS.query_max
-        + WEIGHTS.headers_max
-        + WEIGHTS.body_max
+        WEIGHTS.base_url_match + 0.5 * WEIGHTS.query_max + WEIGHTS.headers_max + WEIGHTS.body_max
     )
     assert score == pytest.approx(expected)
 
@@ -114,10 +114,7 @@ def test_tie_boundary_half_of_headers_match(scorer):
     r2 = make_request(url="/api/x", headers={"a": "1", "b": "999"})
     score = scorer.calculate_score(r1, r2)
     expected = (
-        WEIGHTS.exact_url_bonus
-        + WEIGHTS.query_max
-        + 0.5 * WEIGHTS.headers_max
-        + WEIGHTS.body_max
+        WEIGHTS.exact_url_bonus + WEIGHTS.query_max + 0.5 * WEIGHTS.headers_max + WEIGHTS.body_max
     )
     assert score == pytest.approx(expected)
 
@@ -127,15 +124,13 @@ def test_tie_boundary_half_of_body_keys_match(scorer):
     r2 = make_request(url="/api/x", body=json.dumps({"x": 1, "y": 999}))
     score = scorer.calculate_score(r1, r2)
     expected = (
-        WEIGHTS.exact_url_bonus
-        + WEIGHTS.query_max
-        + WEIGHTS.headers_max
-        + 0.5 * WEIGHTS.body_max
+        WEIGHTS.exact_url_bonus + WEIGHTS.query_max + WEIGHTS.headers_max + 0.5 * WEIGHTS.body_max
     )
     assert score == pytest.approx(expected)
 
 
 # --- Dynamic field normalization -------------------------------------------------
+
 
 def test_dynamic_query_params_are_ignored_in_comparison(scorer):
     r1 = make_request(url="/api/x?timestamp=111")
@@ -166,6 +161,7 @@ def test_non_json_body_with_timestamp_is_scrubbed(scorer):
 
 
 # --- Determinism -------------------------------------------------------------
+
 
 def test_score_is_deterministic_across_repeated_calls(scorer):
     r1 = make_request(url="/api/x?a=1", body=json.dumps({"x": 1}))
